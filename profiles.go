@@ -15,9 +15,9 @@ type Profile struct {
 	DisabledSkills  []string `json:"disabledSkills"`
 }
 
-// DefaultProfilesPath returns the global profiles file location.
-func DefaultProfilesPath(home string) string {
-	return filepath.Join(home, ".claude", "claude-boot", "profiles.json")
+// DefaultProfilesPath returns the profiles file location within configDir.
+func DefaultProfilesPath(configDir string) string {
+	return filepath.Join(configDir, "claude-boot", "profiles.json")
 }
 
 // LoadProfiles reads the profiles file. A missing file yields an empty slice.

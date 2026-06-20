@@ -13,7 +13,7 @@ func sampleModel() model {
 	disabled := Disabled{Plugins: []string{"frontend"}} // frontend starts disabled
 	profiles := []Profile{{Name: "minimal", Model: "claude-haiku-4-5-20251001",
 		Effort: "low", DisabledPlugins: []string{"slack"}, DisabledSkills: []string{"caveman"}}}
-	return newModel(plugins, skills, disabled, "claude-opus-4-8", "high", profiles)
+	return newModel(plugins, skills, disabled, "claude-opus-4-8", "high", profiles, "/home/user/.claude", "/home/user")
 }
 
 func send(m model, msg tea.Msg) model {
@@ -192,7 +192,7 @@ func TestSaveProfileAppendsNewName(t *testing.T) {
 }
 
 func TestProfilePickEmptyStaysMain(t *testing.T) {
-	m := newModel([]Item{{Name: "slack"}}, nil, Disabled{}, "", "", nil) // no profiles
+	m := newModel([]Item{{Name: "slack"}}, nil, Disabled{}, "", "", nil, "/home/user/.claude", "/home/user") // no profiles
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
 	if m.mode != modeMain {
 		t.Errorf("'p' with no profiles should stay modeMain, got %d", m.mode)
@@ -241,5 +241,31 @@ func TestViewProfilePickMode(t *testing.T) {
 	}
 	if !strings.Contains(out, "minimal") {
 		t.Errorf("pick mode should list the 'minimal' profile; out:\n%s", out)
+	}
+}
+
+func TestSelectAllNone(t *testing.T) {
+	m := sampleModel() // frontend disabled, rest enabled
+	// 'n' disables all visible rows
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	for _, r := range m.rows {
+		if r.enabled {
+			t.Errorf("after 'n', row %q should be disabled", r.name)
+		}
+	}
+	// 'a' enables all visible rows
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	for _, r := range m.rows {
+		if !r.enabled {
+			t.Errorf("after 'a', row %q should be enabled", r.name)
+		}
+	}
+}
+
+func TestViewShowsConfigDir(t *testing.T) {
+	m := sampleModel() // configDir set to "~/.claude" via sampleModel
+	out := m.View()
+	if !strings.Contains(out, "config:") {
+		t.Errorf("View() should show config dir; out:\n%s", out)
 	}
 }

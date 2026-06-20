@@ -29,10 +29,21 @@ Single `package main`. Pure logic in focused, unit-tested files:
 
 - Disabled plugins → enabledPlugins[name]=false; disabled skills → skillOverrides[name]="off"
   in the PROJECT .claude/settings.json (persisted; plain `claude` inherits).
-- Model/effort (ANTHROPIC_MODEL, CLAUDE_CODE_EFFORT_LEVEL) are set on the child
-  process only — never written to disk.
-- Profiles are global.
+- Model/effort (ANTHROPIC_MODEL, CLAUDE_CODE_EFFORT_LEVEL) are persisted under
+  `claudeBoot.model` / `claudeBoot.effort` in the PROJECT `.claude/settings.json`
+  when a non-default value is chosen. On the next run they are pre-selected in the
+  TUI (takes priority over env vars). Choosing "inherit" removes the key.
+- Profiles are stored in `<configDir>/claude-boot/profiles.json` where `configDir`
+  is `$CLAUDE_CONFIG_DIR` if set, otherwise `~/.claude`.
 - Tests: stdlib `testing`; TUI tested by feeding tea.KeyMsg to Update.
+
+## Workflow
+
+Development is done directly on `main` — no feature branches. Single maintainer.
+
+## Demo GIF
+
+See [docs/demo.md](docs/demo.md) for how to regenerate the animated demo using VHS.
 
 ## Releasing
 

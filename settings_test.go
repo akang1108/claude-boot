@@ -101,12 +101,70 @@ func TestWriteDisabledRemovesEmptyMaps(t *testing.T) {
 	}
 }
 
+func TestReadModelEffort(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	writeJSON(t, p, map[string]any{
+		"claudeBoot": map[string]any{"model": "claude-opus-4-8", "effort": "high"},
+		"unrelated":  "keep",
+	})
+	model, effort, err := ReadModelEffort(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "claude-opus-4-8" {
+		t.Errorf("model = %q, want claude-opus-4-8", model)
+	}
+	if effort != "high" {
+		t.Errorf("effort = %q, want high", effort)
+	}
+}
+
+func TestReadModelEffortMissing(t *testing.T) {
+	model, effort, err := ReadModelEffort(filepath.Join(t.TempDir(), "nope.json"))
+	if err != nil {
+		t.Fatalf("missing file should not error: %v", err)
+	}
+	if model != "" || effort != "" {
+		t.Errorf("missing file should yield empty strings, got %q %q", model, effort)
+	}
+}
+
+func TestWriteModelEffort(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	writeJSON(t, p, map[string]any{"unrelated": "keep"})
+
+	if err := WriteModelEffort(p, "claude-sonnet-4-6", "medium"); err != nil {
+		t.Fatal(err)
+	}
+	m := readJSON(t, p)
+	cb := m["claudeBoot"].(map[string]any)
+	if cb["model"] != "claude-sonnet-4-6" {
+		t.Errorf("model = %v, want claude-sonnet-4-6", cb["model"])
+	}
+	if cb["effort"] != "medium" {
+		t.Errorf("effort = %v, want medium", cb["effort"])
+	}
+	if m["unrelated"] != "keep" {
+		t.Errorf("unrelated key should be preserved")
+	}
+
+	// Reset to inherit → key removed.
+	if err := WriteModelEffort(p, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	m = readJSON(t, p)
+	if _, ok := m["claudeBoot"]; ok {
+		t.Errorf("claudeBoot should be removed when both are empty")
+	}
+}
+
 func TestRestore(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "settings.json")
 	writeJSON(t, p, map[string]any{
 		"enabledPlugins": map[string]any{"slack": false},
 		"skillOverrides": map[string]any{"caveman": "off"},
+		"claudeBoot":     map[string]any{"model": "claude-opus-4-8"},
 		"keep":           "yes",
 	})
 	if err := Restore(p); err != nil {
@@ -115,6 +173,9 @@ func TestRestore(t *testing.T) {
 	m := readJSON(t, p)
 	if _, ok := m["enabledPlugins"]; ok {
 		t.Errorf("enabledPlugins should be removed")
+	}
+	if _, ok := m["claudeBoot"]; ok {
+		t.Errorf("claudeBoot should be removed")
 	}
 	if m["keep"] != "yes" {
 		t.Errorf("unrelated key should remain")

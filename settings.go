@@ -128,6 +128,43 @@ func WriteDisabled(path string, allPlugins, disabledPlugins, allSkills, disabled
 	return saveSettings(path, m)
 }
 
+// ReadModelEffort returns the model and effort stored under the "claudeBoot"
+// namespace in settings.json. Either may be "" if not set.
+func ReadModelEffort(path string) (model, effort string, err error) {
+	m, loadErr := loadSettings(path)
+	if loadErr != nil {
+		return "", "", loadErr
+	}
+	cb, _ := m["claudeBoot"].(map[string]any)
+	if cb != nil {
+		model, _ = cb["model"].(string)
+		effort, _ = cb["effort"].(string)
+	}
+	return model, effort, nil
+}
+
+// WriteModelEffort persists model/effort under "claudeBoot" in settings.json.
+// When both are empty (inherit), the key is removed entirely.
+func WriteModelEffort(path, model, effort string) error {
+	m, err := loadSettings(path)
+	if err != nil {
+		return err
+	}
+	if model == "" && effort == "" {
+		delete(m, "claudeBoot")
+	} else {
+		cb := map[string]any{}
+		if model != "" {
+			cb["model"] = model
+		}
+		if effort != "" {
+			cb["effort"] = effort
+		}
+		m["claudeBoot"] = cb
+	}
+	return saveSettings(path, m)
+}
+
 // Restore removes the boot-managed keys. If the file becomes empty it is deleted.
 func Restore(path string) error {
 	m, err := loadSettings(path)
@@ -136,6 +173,7 @@ func Restore(path string) error {
 	}
 	delete(m, "enabledPlugins")
 	delete(m, "skillOverrides")
+	delete(m, "claudeBoot")
 	if len(m) == 0 {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err

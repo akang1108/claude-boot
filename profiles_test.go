@@ -62,7 +62,7 @@ func TestLoadProfilesMissing(t *testing.T) {
 
 func TestDefaultProfilesPath(t *testing.T) {
 	want := filepath.Join("/home/u", ".claude", "claude-boot", "profiles.json")
-	if got := DefaultProfilesPath("/home/u"); got != want {
+	if got := DefaultProfilesPath("/home/u/.claude"); got != want {
 		t.Errorf("DefaultProfilesPath = %q, want %q", got, want)
 	}
 }

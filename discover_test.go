@@ -75,6 +75,25 @@ func TestDiscoverSkills(t *testing.T) {
 	}
 }
 
+func TestClaudeConfigDir(t *testing.T) {
+	home := "/home/user"
+	// env var set → use it
+	got := ClaudeConfigDir(func(k string) string {
+		if k == "CLAUDE_CONFIG_DIR" {
+			return "/custom/config"
+		}
+		return ""
+	}, home)
+	if got != "/custom/config" {
+		t.Errorf("got %q, want /custom/config", got)
+	}
+	// env var not set → ~/.claude
+	got = ClaudeConfigDir(func(string) string { return "" }, home)
+	if got != "/home/user/.claude" {
+		t.Errorf("got %q, want /home/user/.claude", got)
+	}
+}
+
 func TestEnvDefaults(t *testing.T) {
 	env := map[string]string{EnvModel: "claude-opus-4-8", EnvEffort: "high"}
 	m, e := EnvDefaults(func(k string) string { return env[k] })

@@ -55,11 +55,13 @@ type model struct {
 	saveName    textinput.Model
 	savedNotice string
 
+	configDir string // display only
+
 	quit   bool
 	launch bool
 }
 
-func newModel(plugins, skills []Item, disabled Disabled, curModel, curEffort string, profiles []Profile) model {
+func newModel(plugins, skills []Item, disabled Disabled, curModel, curEffort string, profiles []Profile, configDir, home string) model {
 	var rows []row
 	for _, p := range plugins {
 		rows = append(rows, row{kind: kindPlugin, name: p.Name, desc: p.Description,
@@ -75,6 +77,11 @@ func newModel(plugins, skills []Item, disabled Disabled, curModel, curEffort str
 	si := textinput.New()
 	si.Placeholder = "profile name"
 
+	displayDir := configDir
+	if home != "" && strings.HasPrefix(configDir, home) {
+		displayDir = "~" + configDir[len(home):]
+	}
+
 	return model{
 		rows:      rows,
 		modelIdx:  ModelIndexByID(curModel),
@@ -84,6 +91,7 @@ func newModel(plugins, skills []Item, disabled Disabled, curModel, curEffort str
 		filter:    fi,
 		saveName:  si,
 		profiles:  profiles,
+		configDir: displayDir,
 	}
 }
 
@@ -266,6 +274,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			m.mode = modeProfileSave
 			m.saveName.Focus()
+		case "a":
+			for _, idx := range m.visibleRows() {
+				m.rows[idx].enabled = true
+			}
+		case "n":
+			for _, idx := range m.visibleRows() {
+				m.rows[idx].enabled = false
+			}
 		}
 	}
 	return m, nil
@@ -337,6 +353,9 @@ func (m model) View() string {
 	// modeMain
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("claude-boot") + "\n")
+	if m.configDir != "" {
+		b.WriteString(footerStyle.Render("config: "+m.configDir) + "\n")
+	}
 
 	modelVal := Models[m.modelIdx].Label
 	effortLabel := Efforts[m.effortIdx]
@@ -403,7 +422,7 @@ func (m model) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(44).Render(listBlock), detailStyle.Render(detail))
 	b.WriteString(body + "\n")
 
-	footer := "space toggle · / filter · p profiles · s save · ↵ launch · esc cancel"
+	footer := "space toggle · a all · n none · / filter · p profiles · s save · ↵ launch · esc cancel"
 	b.WriteString(footerStyle.Render(footer))
 	if m.savedNotice != "" {
 		b.WriteString("\n" + noticeStyle.Render(m.savedNotice))

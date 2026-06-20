@@ -46,15 +46,16 @@ func run(args cliArgs, env []string, home, cwd string) error {
 		if err := Restore(sp); err != nil {
 			return err
 		}
-		fmt.Println("Restored: removed enabledPlugins and skillOverrides from .claude/settings.json")
+		fmt.Println("Restored: removed claude-boot keys from .claude/settings.json")
 		return nil
 	}
 
-	plugins, err := DiscoverPlugins(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"))
+	configDir := ClaudeConfigDir(os.Getenv, home)
+	plugins, err := DiscoverPlugins(filepath.Join(configDir, "plugins", "installed_plugins.json"))
 	if err != nil {
 		return err
 	}
-	skills, err := DiscoverSkills(filepath.Join(home, ".claude", "skills"))
+	skills, err := DiscoverSkills(filepath.Join(configDir, "skills"))
 	if err != nil {
 		return err
 	}
@@ -62,7 +63,7 @@ func run(args cliArgs, env []string, home, cwd string) error {
 	if err != nil {
 		return err
 	}
-	profiles, err := LoadProfiles(DefaultProfilesPath(home))
+	profiles, err := LoadProfiles(DefaultProfilesPath(configDir))
 	if err != nil {
 		return err
 	}
@@ -79,18 +80,39 @@ func run(args cliArgs, env []string, home, cwd string) error {
 		if err := WriteDisabled(sp, names(plugins), p.DisabledPlugins, names(skills), p.DisabledSkills); err != nil {
 			return err
 		}
+		if err := WriteModelEffort(sp, p.Model, p.Effort); err != nil {
+			return err
+		}
 		return Launch(ChildEnv(env, p.Model, p.Effort))
 	}
 
-	// Interactive path.
+	// Interactive path. Persisted model/effort takes priority over env defaults.
 	curModel, curEffort := EnvDefaults(os.Getenv)
-	m := newModel(plugins, skills, disabled, curModel, curEffort, profiles)
+	pm, pe, err := ReadModelEffort(sp)
+	if err != nil {
+		return err
+	}
+	if pm != "" {
+		curModel = pm
+	}
+	if pe != "" {
+		curEffort = pe
+	}
+	m := newModel(plugins, skills, disabled, curModel, curEffort, profiles, configDir, home)
 	final, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return err
 	}
 	fm := final.(model)
 	dp, ds, modelID, effort, launch := fm.result()
+
+	// Persist profiles regardless of launch/cancel so saves aren't lost on Escape.
+	for _, p := range fm.profiles {
+		if err := SaveProfile(DefaultProfilesPath(configDir), p); err != nil {
+			return err
+		}
+	}
+
 	if !launch {
 		fmt.Println("Cancelled.")
 		return nil
@@ -101,11 +123,8 @@ func run(args cliArgs, env []string, home, cwd string) error {
 	if err := WriteDisabled(sp, names(plugins), dp, names(skills), ds); err != nil {
 		return err
 	}
-	// Persist any profiles saved during the session.
-	for _, p := range fm.profiles {
-		if err := SaveProfile(DefaultProfilesPath(home), p); err != nil {
-			return err
-		}
+	if err := WriteModelEffort(sp, modelID, effort); err != nil {
+		return err
 	}
 	return Launch(ChildEnv(env, modelID, effort))
 }

@@ -109,3 +109,12 @@ func skillDescription(skillMdPath string) string {
 func EnvDefaults(getenv func(string) string) (model, effort string) {
 	return getenv(EnvModel), getenv(EnvEffort)
 }
+
+// ClaudeConfigDir returns the effective Claude config directory: $CLAUDE_CONFIG_DIR
+// when set, otherwise ~/.claude.
+func ClaudeConfigDir(getenv func(string) string, home string) string {
+	if v := getenv("CLAUDE_CONFIG_DIR"); v != "" {
+		return v
+	}
+	return filepath.Join(home, ".claude")
+}
