@@ -64,6 +64,19 @@ func SaveProfile(path string, p Profile) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
+// SaveProfiles overwrites the profiles file with the given slice (deletions included).
+func SaveProfiles(path string, profiles []Profile) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(profiles, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	return os.WriteFile(path, b, 0o644)
+}
+
 // FindProfile returns the named profile and whether it was found.
 func FindProfile(profiles []Profile, name string) (Profile, bool) {
 	for _, p := range profiles {

@@ -50,6 +50,13 @@ See [docs/demo.md](docs/demo.md) for how to regenerate the animated demo using V
 See [docs/releasing.md](docs/releasing.md). Every push to `main` auto-increments
 the patch version and publishes a GitHub release with three pre-built binaries.
 
+## TUI navigation
+
+The TUI has four focusable sections cycled with `tab` / `shift-tab`:
+`Plugins → Skills → Model → Effort`. Up/down move within the active section;
+space toggles the highlighted plugin or skill. In the profile picker, `d` deletes
+the selected profile.
+
 ## Notes
 
 - **Always shows the TUI.** Unlike the original bash script (which `exec`'d

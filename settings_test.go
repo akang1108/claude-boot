@@ -182,6 +182,27 @@ func TestRestore(t *testing.T) {
 	}
 }
 
+func TestReadGlobalDefaults(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	writeJSON(t, p, map[string]any{
+		"model":       "opus",
+		"effortLevel": "medium",
+		"unrelated":   "x",
+	})
+	model, effort := ReadGlobalDefaults(p)
+	if model != "opus" {
+		t.Errorf("model = %q, want opus", model)
+	}
+	if effort != "medium" {
+		t.Errorf("effort = %q, want medium", effort)
+	}
+
+	model, effort = ReadGlobalDefaults(filepath.Join(t.TempDir(), "nope.json"))
+	if model != "" || effort != "" {
+		t.Errorf("missing file should return empty strings, got %q %q", model, effort)
+	}
+}
+
 func TestRestoreDeletesEmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "settings.json")

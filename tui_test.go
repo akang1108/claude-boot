@@ -13,7 +13,7 @@ func sampleModel() model {
 	disabled := Disabled{Plugins: []string{"frontend"}} // frontend starts disabled
 	profiles := []Profile{{Name: "minimal", Model: "claude-haiku-4-5-20251001",
 		Effort: "low", DisabledPlugins: []string{"slack"}, DisabledSkills: []string{"caveman"}}}
-	return newModel(plugins, skills, disabled, "claude-opus-4-8", "high", profiles, "/home/user/.claude", "/home/user")
+	return newModel(plugins, skills, disabled, "claude-opus-4-8", "high", profiles, "/home/user/.claude", "/home/user", "opus", "medium")
 }
 
 func send(m model, msg tea.Msg) model {
@@ -42,22 +42,35 @@ func TestNewModelPrefillAndDisabled(t *testing.T) {
 
 func TestTabCyclesRegion(t *testing.T) {
 	m := sampleModel()
+	if m.region != regionPlugins {
+		t.Fatalf("default region should be regionPlugins")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
+	if m.region != regionSkills {
+		t.Errorf("after tab want regionSkills, got %d", m.region)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
 	if m.region != regionModel {
-		t.Fatalf("default region should be regionModel")
+		t.Errorf("after 2 tabs want regionModel, got %d", m.region)
 	}
 	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
 	if m.region != regionEffort {
-		t.Errorf("after tab want regionEffort, got %d", m.region)
+		t.Errorf("after 3 tabs want regionEffort, got %d", m.region)
 	}
 	m = send(m, tea.KeyMsg{Type: tea.KeyTab})
-	m = send(m, tea.KeyMsg{Type: tea.KeyTab}) // wraps back to model
-	if m.region != regionModel {
-		t.Errorf("region should wrap to regionModel, got %d", m.region)
+	if m.region != regionPlugins {
+		t.Errorf("after 4 tabs should wrap to regionPlugins, got %d", m.region)
+	}
+	// shift-tab goes backward
+	m = send(m, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if m.region != regionEffort {
+		t.Errorf("shift-tab from regionPlugins should go to regionEffort, got %d", m.region)
 	}
 }
 
 func TestModelEffortCycling(t *testing.T) {
-	m := sampleModel() // region starts on model
+	m := sampleModel()
+	m.region = regionModel
 	start := m.modelIdx
 	m = send(m, tea.KeyMsg{Type: tea.KeyDown})
 	if m.modelIdx != (start+1)%len(Models) {
@@ -73,9 +86,9 @@ func TestModelEffortCycling(t *testing.T) {
 
 func TestToggleListItem(t *testing.T) {
 	m := sampleModel()
-	m.region = regionList
-	m.cursor = 0 // first visible row
-	first := m.visibleRows()[0]
+	m.region = regionPlugins
+	m.pluginCursor = 0 // first visible plugin row
+	first := m.visiblePluginRows()[0]
 	before := m.rows[first].enabled
 	m = send(m, tea.KeyMsg{Type: tea.KeySpace})
 	if m.rows[first].enabled == before {
@@ -85,7 +98,7 @@ func TestToggleListItem(t *testing.T) {
 
 func TestFilterNarrowsRows(t *testing.T) {
 	m := sampleModel()
-	m.region = regionList
+	m.region = regionSkills
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}) // enter filter
 	for _, r := range "cave" {
 		m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
@@ -191,8 +204,38 @@ func TestSaveProfileAppendsNewName(t *testing.T) {
 	}
 }
 
+func TestDeleteProfile(t *testing.T) {
+	m := sampleModel() // has 1 profile: "minimal"
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if m.mode != modeProfilePick {
+		t.Fatalf("expected modeProfilePick")
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if len(m.profiles) != 0 {
+		t.Errorf("delete should remove profile, got %d profiles", len(m.profiles))
+	}
+	if m.mode != modeMain {
+		t.Errorf("deleting last profile should return to modeMain, got %d", m.mode)
+	}
+}
+
+func TestDeleteProfileClampsCorsor(t *testing.T) {
+	m := sampleModel()
+	// add a second profile so cursor can be at index 1
+	m.profiles = append(m.profiles, Profile{Name: "other"})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown}) // cursor = 1
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}) // delete "other" at index 1
+	if m.profCursor != 0 {
+		t.Errorf("cursor should clamp to 0 after deleting last item, got %d", m.profCursor)
+	}
+	if len(m.profiles) != 1 || m.profiles[0].Name != "minimal" {
+		t.Errorf("wrong profiles after delete: %v", m.profiles)
+	}
+}
+
 func TestProfilePickEmptyStaysMain(t *testing.T) {
-	m := newModel([]Item{{Name: "slack"}}, nil, Disabled{}, "", "", nil, "/home/user/.claude", "/home/user") // no profiles
+	m := newModel([]Item{{Name: "slack"}}, nil, Disabled{}, "", "", nil, "/home/user/.claude", "/home/user", "", "") // no profiles
 	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
 	if m.mode != modeMain {
 		t.Errorf("'p' with no profiles should stay modeMain, got %d", m.mode)
@@ -212,9 +255,6 @@ func TestViewContainsKeyElements(t *testing.T) {
 func TestViewShowsDisabledMarker(t *testing.T) {
 	m := sampleModel() // frontend starts disabled, slack enabled; region=regionModel (no row highlighted)
 	out := m.View()
-	if !strings.Contains(out, "DETAIL") {
-		t.Errorf("View() should contain a DETAIL pane label")
-	}
 	if !strings.Contains(out, "[✓] slack") {
 		t.Errorf("enabled plugin slack should render a checked box; out:\n%s", out)
 	}

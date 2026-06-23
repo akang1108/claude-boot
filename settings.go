@@ -128,6 +128,18 @@ func WriteDisabled(path string, allPlugins, disabledPlugins, allSkills, disabled
 	return saveSettings(path, m)
 }
 
+// ReadGlobalDefaults returns the model and effortLevel from the global
+// ~/.claude/settings.json (top-level keys, not the claudeBoot namespace).
+func ReadGlobalDefaults(path string) (model, effort string) {
+	m, err := loadSettings(path)
+	if err != nil {
+		return "", ""
+	}
+	model, _ = m["model"].(string)
+	effort, _ = m["effortLevel"].(string)
+	return model, effort
+}
+
 // ReadModelEffort returns the model and effort stored under the "claudeBoot"
 // namespace in settings.json. Either may be "" if not set.
 func ReadModelEffort(path string) (model, effort string, err error) {

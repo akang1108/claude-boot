@@ -51,6 +51,7 @@ func run(args cliArgs, env []string, home, cwd string) error {
 	}
 
 	configDir := ClaudeConfigDir(os.Getenv, home)
+	globalModel, globalEffort := ReadGlobalDefaults(filepath.Join(configDir, "settings.json"))
 	plugins, err := DiscoverPlugins(filepath.Join(configDir, "plugins", "installed_plugins.json"))
 	if err != nil {
 		return err
@@ -80,7 +81,8 @@ func run(args cliArgs, env []string, home, cwd string) error {
 		if err := WriteDisabled(sp, names(plugins), p.DisabledPlugins, names(skills), p.DisabledSkills); err != nil {
 			return err
 		}
-		if err := WriteModelEffort(sp, p.Model, p.Effort); err != nil {
+		pm, pe := suppressGlobalDefaults(p.Model, p.Effort, globalModel, globalEffort)
+		if err := WriteModelEffort(sp, pm, pe); err != nil {
 			return err
 		}
 		return Launch(ChildEnv(env, p.Model, p.Effort))
@@ -98,7 +100,7 @@ func run(args cliArgs, env []string, home, cwd string) error {
 	if pe != "" {
 		curEffort = pe
 	}
-	m := newModel(plugins, skills, disabled, curModel, curEffort, profiles, configDir, home)
+	m := newModel(plugins, skills, disabled, curModel, curEffort, profiles, configDir, home, globalModel, globalEffort)
 	final, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return err
@@ -106,11 +108,9 @@ func run(args cliArgs, env []string, home, cwd string) error {
 	fm := final.(model)
 	dp, ds, modelID, effort, launch := fm.result()
 
-	// Persist profiles regardless of launch/cancel so saves aren't lost on Escape.
-	for _, p := range fm.profiles {
-		if err := SaveProfile(DefaultProfilesPath(configDir), p); err != nil {
-			return err
-		}
+	// Persist profiles regardless of launch/cancel so saves and deletes aren't lost on Escape.
+	if err := SaveProfiles(DefaultProfilesPath(configDir), fm.profiles); err != nil {
+		return err
 	}
 
 	if !launch {
@@ -123,10 +123,24 @@ func run(args cliArgs, env []string, home, cwd string) error {
 	if err := WriteDisabled(sp, names(plugins), dp, names(skills), ds); err != nil {
 		return err
 	}
-	if err := WriteModelEffort(sp, modelID, effort); err != nil {
+	wm, we := suppressGlobalDefaults(modelID, effort, globalModel, globalEffort)
+	if err := WriteModelEffort(sp, wm, we); err != nil {
 		return err
 	}
 	return Launch(ChildEnv(env, modelID, effort))
+}
+
+// suppressGlobalDefaults zeros out model/effort when they match the global
+// ~/.claude/settings.json values so they aren't redundantly written to the
+// project settings.json.
+func suppressGlobalDefaults(model, effort, globalModel, globalEffort string) (string, string) {
+	if model == globalModel {
+		model = ""
+	}
+	if effort == globalEffort {
+		effort = ""
+	}
+	return model, effort
 }
 
 func names(items []Item) []string {

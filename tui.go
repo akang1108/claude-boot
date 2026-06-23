@@ -26,9 +26,10 @@ type row struct {
 type region int
 
 const (
-	regionModel region = iota
+	regionPlugins region = iota
+	regionSkills
+	regionModel
 	regionEffort
-	regionList
 )
 
 type uiMode int
@@ -40,12 +41,13 @@ const (
 )
 
 type model struct {
-	rows      []row
-	cursor    int // index into visibleRows()
-	modelIdx  int
-	effortIdx int
-	region    region
-	mode      uiMode
+	rows         []row
+	pluginCursor int
+	skillCursor  int
+	modelIdx     int
+	effortIdx    int
+	region       region
+	mode         uiMode
 
 	filter    textinput.Model
 	filtering bool
@@ -55,13 +57,20 @@ type model struct {
 	saveName    textinput.Model
 	savedNotice string
 
-	configDir string // display only
+	configDir    string // display only
+	globalModel  string // from ~/.claude/settings.json, shown in inherit label
+	globalEffort string // from ~/.claude/settings.json, shown in inherit label
+
+	width      int
+	height     int
+	scrollTop  int // first vis-cursor index shown in combined list
+	listHeight int // available lines for the list section (0 = unlimited)
 
 	quit   bool
 	launch bool
 }
 
-func newModel(plugins, skills []Item, disabled Disabled, curModel, curEffort string, profiles []Profile, configDir, home string) model {
+func newModel(plugins, skills []Item, disabled Disabled, curModel, curEffort string, profiles []Profile, configDir, home, globalModel, globalEffort string) model {
 	var rows []row
 	for _, p := range plugins {
 		rows = append(rows, row{kind: kindPlugin, name: p.Name, desc: p.Description,
@@ -86,12 +95,14 @@ func newModel(plugins, skills []Item, disabled Disabled, curModel, curEffort str
 		rows:      rows,
 		modelIdx:  ModelIndexByID(curModel),
 		effortIdx: EffortIndex(curEffort),
-		region:    regionModel,
+		region:    regionPlugins,
 		mode:      modeMain,
 		filter:    fi,
 		saveName:  si,
-		profiles:  profiles,
-		configDir: displayDir,
+		profiles:     profiles,
+		configDir:    displayDir,
+		globalModel:  globalModel,
+		globalEffort: globalEffort,
 	}
 }
 
@@ -109,27 +120,139 @@ func (m model) visibleRows() []int {
 	return out
 }
 
-func (m *model) clampCursor() {
-	n := len(m.visibleRows())
-	if n == 0 {
-		m.cursor = 0
+func (m model) visiblePluginRows() []int {
+	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	var out []int
+	for i, r := range m.rows {
+		if r.kind == kindPlugin && (q == "" || strings.Contains(strings.ToLower(r.name), q)) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func (m model) visibleSkillRows() []int {
+	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	var out []int
+	for i, r := range m.rows {
+		if r.kind == kindSkill && (q == "" || strings.Contains(strings.ToLower(r.name), q)) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// activeCursorRowIndex returns the m.rows index of the currently highlighted item, or -1.
+func (m model) activeCursorRowIndex() int {
+	switch m.region {
+	case regionPlugins:
+		pvis := m.visiblePluginRows()
+		if m.pluginCursor >= 0 && m.pluginCursor < len(pvis) {
+			return pvis[m.pluginCursor]
+		}
+	case regionSkills:
+		svis := m.visibleSkillRows()
+		if m.skillCursor >= 0 && m.skillCursor < len(svis) {
+			return svis[m.skillCursor]
+		}
+	}
+	return -1
+}
+
+// overheadLines estimates lines consumed by the header and footer sections.
+func (m model) overheadLines() int {
+	n := 8 // title(1) + pickers(2) + footer(3) + buffer(2)
+	if m.configDir != "" {
+		n += 2 // config line + footerStyle top-padding
+	}
+	return n
+}
+
+// ensureVisible adjusts scrollTop so the active cursor row stays within the visible window.
+func (m *model) ensureVisible() {
+	if m.listHeight <= 0 {
 		return
 	}
-	if m.cursor >= n {
-		m.cursor = n - 1
+	avail := m.listHeight - 2 // reserve 2 lines for section headers
+	if avail < 1 {
+		avail = 1
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
+	vis := m.visibleRows()
+	n := len(vis)
+	if n == 0 {
+		m.scrollTop = 0
+		return
+	}
+	targetRowIdx := m.activeCursorRowIndex()
+	if targetRowIdx < 0 {
+		return
+	}
+	targetPos := -1
+	for i, idx := range vis {
+		if idx == targetRowIdx {
+			targetPos = i
+			break
+		}
+	}
+	if targetPos < 0 {
+		return
+	}
+	if targetPos < m.scrollTop {
+		m.scrollTop = targetPos
+	} else if targetPos >= m.scrollTop+avail {
+		m.scrollTop = targetPos - avail + 1
+	}
+	maxTop := n - avail
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	if m.scrollTop > maxTop {
+		m.scrollTop = maxTop
+	}
+	if m.scrollTop < 0 {
+		m.scrollTop = 0
 	}
 }
 
-func (m *model) toggle() {
-	vis := m.visibleRows()
-	if m.cursor < 0 || m.cursor >= len(vis) {
-		return
+func (m *model) clampCursor() {
+	pvis := m.visiblePluginRows()
+	if len(pvis) == 0 {
+		m.pluginCursor = 0
+	} else if m.pluginCursor >= len(pvis) {
+		m.pluginCursor = len(pvis) - 1
+	} else if m.pluginCursor < 0 {
+		m.pluginCursor = 0
 	}
-	idx := vis[m.cursor]
-	m.rows[idx].enabled = !m.rows[idx].enabled
+
+	svis := m.visibleSkillRows()
+	if len(svis) == 0 {
+		m.skillCursor = 0
+	} else if m.skillCursor >= len(svis) {
+		m.skillCursor = len(svis) - 1
+	} else if m.skillCursor < 0 {
+		m.skillCursor = 0
+	}
+
+	m.ensureVisible()
+}
+
+func (m *model) toggle() {
+	switch m.region {
+	case regionPlugins:
+		pvis := m.visiblePluginRows()
+		if m.pluginCursor < 0 || m.pluginCursor >= len(pvis) {
+			return
+		}
+		idx := pvis[m.pluginCursor]
+		m.rows[idx].enabled = !m.rows[idx].enabled
+	case regionSkills:
+		svis := m.visibleSkillRows()
+		if m.skillCursor < 0 || m.skillCursor >= len(svis) {
+			return
+		}
+		idx := svis[m.skillCursor]
+		m.rows[idx].enabled = !m.rows[idx].enabled
+	}
 }
 
 func (m *model) applyProfile(p Profile) {
@@ -180,6 +303,18 @@ func (m model) result() (disabledPlugins, disabledSkills []string, modelID, effo
 // mutations reach the caller only through the final `return m, nil`; any early
 // return added to the modeMain handling MUST return the mutated `m`.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if sz, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = sz.Width
+		m.height = sz.Height
+		if sz.Height > 0 {
+			m.listHeight = sz.Height - m.overheadLines()
+			if m.listHeight < 3 {
+				m.listHeight = 3
+			}
+		}
+		m.ensureVisible()
+		return m, nil
+	}
 	km, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -225,6 +360,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = modeMain
 		case tea.KeyEsc:
 			m.mode = modeMain
+		case tea.KeyRunes:
+			if string(km.Runes) == "d" && len(m.profiles) > 0 {
+				m.profiles = append(m.profiles[:m.profCursor], m.profiles[m.profCursor+1:]...)
+				if m.profCursor >= len(m.profiles) && m.profCursor > 0 {
+					m.profCursor--
+				}
+				if len(m.profiles) == 0 {
+					m.mode = modeMain
+				}
+			}
 		}
 		return m, nil
 	}
@@ -246,7 +391,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch km.Type {
 	case tea.KeyTab:
-		m.region = (m.region + 1) % 3
+		m.region = (m.region + 1) % 4
+		m.ensureVisible()
+	case tea.KeyShiftTab:
+		m.region = (m.region - 1 + 4) % 4
+		m.ensureVisible()
 	case tea.KeyEsc:
 		m.quit = true
 		return m, tea.Quit
@@ -258,7 +407,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyDown:
 		m.move(1)
 	case tea.KeySpace:
-		if m.region == regionList {
+		if m.region == regionPlugins || m.region == regionSkills {
 			m.toggle()
 		}
 	case tea.KeyRunes:
@@ -289,13 +438,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) move(delta int) {
 	switch m.region {
+	case regionPlugins:
+		pvis := m.visiblePluginRows()
+		if len(pvis) == 0 {
+			return
+		}
+		m.pluginCursor += delta
+		if m.pluginCursor < 0 {
+			m.pluginCursor = 0
+		}
+		if m.pluginCursor >= len(pvis) {
+			m.pluginCursor = len(pvis) - 1
+		}
+		m.ensureVisible()
+	case regionSkills:
+		svis := m.visibleSkillRows()
+		if len(svis) == 0 {
+			return
+		}
+		m.skillCursor += delta
+		if m.skillCursor < 0 {
+			m.skillCursor = 0
+		}
+		if m.skillCursor >= len(svis) {
+			m.skillCursor = len(svis) - 1
+		}
+		m.ensureVisible()
 	case regionModel:
 		m.modelIdx = (m.modelIdx + delta + len(Models)) % len(Models)
 	case regionEffort:
 		m.effortIdx = (m.effortIdx + delta + len(Efforts)) % len(Efforts)
-	case regionList:
-		m.cursor += delta
-		m.clampCursor()
 	}
 }
 
@@ -310,14 +482,31 @@ func upsertProfile(ps []Profile, p Profile) []Profile {
 }
 
 var (
-	titleStyle  = lipgloss.NewStyle().Bold(true).Padding(0, 1)
-	activeStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	headerStyle = lipgloss.NewStyle().Bold(true).Underline(true)
-	detailStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).Width(34)
-	footerStyle = lipgloss.NewStyle().Faint(true).Padding(1, 1, 0, 1)
-	selectedRow = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
-	noticeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	titleStyle        = lipgloss.NewStyle().Bold(true).Padding(0, 1)
+	activeStyle       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	headerStyle       = lipgloss.NewStyle().Bold(true).Underline(true)
+	activeSectionStyle = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(lipgloss.Color("212"))
+	footerStyle       = lipgloss.NewStyle().Faint(true).Padding(1, 1, 0, 1)
+	selectedRow       = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
+	noticeStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 )
+
+// truncateLine shortens s to fit within max visible columns, appending "…" if cut.
+func truncateLine(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	w := lipgloss.Width(s)
+	if w <= max {
+		return s
+	}
+	// strip runes until we fit, accounting for the ellipsis
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes)+"…") > max {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
+}
 
 func fieldLabel(active bool, label, value string) string {
 	s := fmt.Sprintf("%s ▾ %s", label, value)
@@ -346,25 +535,18 @@ func (m model) View() string {
 			}
 			b.WriteString(cursor + line + "\n")
 		}
-		b.WriteString("\n" + footerStyle.Render("↑/↓ choose · enter load · esc cancel"))
+		b.WriteString("\n" + footerStyle.Render("↑/↓ choose · enter load · d delete · esc cancel"))
 		return b.String()
 	}
 
 	// modeMain
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("claude-boot") + "\n")
-	if m.configDir != "" {
-		b.WriteString(footerStyle.Render("config: "+m.configDir) + "\n")
-	}
 
-	modelVal := Models[m.modelIdx].Label
-	effortLabel := Efforts[m.effortIdx]
-	if effortLabel == "" {
-		effortLabel = "— inherit (don't set)"
+	w := m.width
+	if w <= 0 {
+		w = 80 // safe default before first WindowSizeMsg
 	}
-	fields := fieldLabel(m.region == regionModel, "Model:", modelVal) +
-		"    " + fieldLabel(m.region == regionEffort, "Effort:", effortLabel)
-	b.WriteString(fields + "\n\n")
 
 	// Build the list with section headers and a checkbox per row.
 	vis := m.visibleRows()
@@ -378,17 +560,49 @@ func (m model) View() string {
 			skills++
 		}
 	}
-	highlighted := -1
-	if m.region == regionList && m.cursor < len(vis) {
-		highlighted = vis[m.cursor]
+	highlighted := m.activeCursorRowIndex()
+	// prefix is 2 cols ("  " or "▶ "), checkbox+space is 4 cols ("[✓] "), so name budget = w - 6
+	nameBudget := w - 6
+	if nameBudget < 10 {
+		nameBudget = 10
 	}
-	for _, idx := range vis {
+
+	// Determine which slice of vis to render.
+	visStart := 0
+	visEnd := len(vis)
+	if m.listHeight > 0 && len(vis) > 0 {
+		avail := m.listHeight - 2 // reserve 2 lines for section headers
+		if avail < 1 {
+			avail = 1
+		}
+		visStart = m.scrollTop
+		visEnd = visStart + avail
+		if visEnd > len(vis) {
+			visEnd = len(vis)
+		}
+	}
+
+	if visStart > 0 {
+		listLines = append(listLines, fmt.Sprintf("  ↑ %d more", visStart))
+	}
+	for i := visStart; i < visEnd; i++ {
+		idx := vis[i]
 		r := m.rows[idx]
 		if r.kind != lastKind {
 			if r.kind == kindPlugin {
-				listLines = append(listLines, headerStyle.Render(fmt.Sprintf("Plugins (%d)", plugins)))
+				hdr := fmt.Sprintf("Plugins (%d)", plugins)
+				if m.region == regionPlugins {
+					listLines = append(listLines, activeSectionStyle.Render(hdr))
+				} else {
+					listLines = append(listLines, headerStyle.Render(hdr))
+				}
 			} else {
-				listLines = append(listLines, headerStyle.Render(fmt.Sprintf("Skills (%d)", skills)))
+				hdr := fmt.Sprintf("Skills (%d)", skills)
+				if m.region == regionSkills {
+					listLines = append(listLines, activeSectionStyle.Render(hdr))
+				} else {
+					listLines = append(listLines, headerStyle.Render(hdr))
+				}
 			}
 			lastKind = r.kind
 		}
@@ -397,32 +611,57 @@ func (m model) View() string {
 			box = " "
 		}
 		pointer := "  "
-		line := fmt.Sprintf("[%s] %s", box, r.name)
+		name := truncateLine(r.name, nameBudget)
+		line := fmt.Sprintf("[%s] %s", box, name)
 		if idx == highlighted {
 			pointer = "▶ "
 			line = selectedRow.Render(line)
 		}
 		listLines = append(listLines, pointer+line)
 	}
+	if visEnd < len(vis) {
+		listLines = append(listLines, fmt.Sprintf("  ↓ %d more", len(vis)-visEnd))
+	}
+
 	if m.filtering || m.filter.Value() != "" {
 		listLines = append(listLines, "", m.filter.View())
 	}
-	listBlock := strings.Join(listLines, "\n")
+	b.WriteString(strings.Join(listLines, "\n") + "\n")
 
-	// Detail pane for the highlighted row.
-	detail := "DETAIL\n\n(use ↑/↓ in the list)"
-	if highlighted >= 0 {
-		r := m.rows[highlighted]
-		desc := r.desc
-		if desc == "" {
-			desc = "(no description)"
+	// Model/Effort pickers at bottom
+	modelVal := Models[m.modelIdx].Label
+	if m.modelIdx == 0 {
+		if m.globalModel != "" {
+			modelVal = "— inherit (global: " + m.globalModel + ")"
+		} else {
+			modelVal = "— inherit (don't set)"
 		}
-		detail = fmt.Sprintf("DETAIL\n\n%s\n\n%s", r.name, desc)
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(44).Render(listBlock), detailStyle.Render(detail))
-	b.WriteString(body + "\n")
+	effortLabel := Efforts[m.effortIdx]
+	if effortLabel == "" {
+		if m.globalEffort != "" {
+			effortLabel = "— inherit (global: " + m.globalEffort + ")"
+		} else {
+			effortLabel = "— inherit (don't set)"
+		}
+	}
+	f1 := fieldLabel(m.region == regionModel, "Model:", modelVal)
+	f2 := fieldLabel(m.region == regionEffort, "Effort:", effortLabel)
+	if w < 60 {
+		b.WriteString("\n" + f1 + "\n" + f2 + "\n")
+	} else {
+		b.WriteString("\n" + f1 + "    " + f2 + "\n")
+	}
 
-	footer := "space toggle · a all · n none · / filter · p profiles · s save · ↵ launch · esc cancel"
+	var footer string
+	if w < 60 {
+		footer = "tab/⇧tab sections · space toggle · a all · n none · / filter\np profiles · s save · ↵ launch · esc quit"
+	} else {
+		footer = "tab/⇧tab sections · space toggle · a all · n none · / filter · p profiles · s save · ↵ launch · esc quit"
+	}
+	if m.configDir != "" {
+		b.WriteString(footerStyle.Render("config: "+m.configDir) + "\n")
+	}
 	b.WriteString(footerStyle.Render(footer))
 	if m.savedNotice != "" {
 		b.WriteString("\n" + noticeStyle.Render(m.savedNotice))

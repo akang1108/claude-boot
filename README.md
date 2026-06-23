@@ -4,9 +4,9 @@
 
 An interactive launcher for [Claude Code](https://claude.ai/code). Before starting a Claude session, it lets you:
 
-- Toggle installed **plugins** and **skills** on/off
+- Toggle installed **plugins** and **skills** on/off (separate sections; `tab`/`shift-tab` to move between them)
 - Pick the **model** and **thinking effort** level
-- Apply saved **profiles** (preset combinations of the above)
+- Apply, save, and delete named **profiles** (preset combinations of the above)
 
 All choices are persisted to your project's `.claude/settings.json` — including model and thinking effort — so they're remembered the next time you run `claude-boot` in that repo, and plain `claude` inherits the plugin/skill toggles too.
 

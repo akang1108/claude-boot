@@ -27,6 +27,31 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
+func TestSuppressGlobalDefaults(t *testing.T) {
+	cases := []struct {
+		model, effort, gModel, gEffort string
+		wantModel, wantEffort          string
+	}{
+		// effort matches global → suppressed; model differs → kept
+		{"claude-sonnet-4-6", "medium", "opus", "medium", "claude-sonnet-4-6", ""},
+		// both match global → both suppressed
+		{"opus", "medium", "opus", "medium", "", ""},
+		// neither matches → both kept
+		{"claude-sonnet-4-6", "high", "opus", "medium", "claude-sonnet-4-6", "high"},
+		// inherit ("") → not equal to "opus", stays ""
+		{"", "medium", "opus", "medium", "", ""},
+		// global has no effort set → nothing suppressed for effort
+		{"", "medium", "opus", "", "", "medium"},
+	}
+	for _, c := range cases {
+		m, e := suppressGlobalDefaults(c.model, c.effort, c.gModel, c.gEffort)
+		if m != c.wantModel || e != c.wantEffort {
+			t.Errorf("suppressGlobalDefaults(%q,%q,%q,%q) = (%q,%q), want (%q,%q)",
+				c.model, c.effort, c.gModel, c.gEffort, m, e, c.wantModel, c.wantEffort)
+		}
+	}
+}
+
 func TestRunRestore(t *testing.T) {
 	cwd := t.TempDir()
 	claudeDir := filepath.Join(cwd, ".claude")
