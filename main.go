@@ -52,6 +52,14 @@ func run(args cliArgs, env []string, home, cwd string) error {
 
 	configDir := ClaudeConfigDir(os.Getenv, home)
 	globalModel, globalEffort := ReadGlobalDefaults(filepath.Join(configDir, "settings.json"))
+	// Env vars take precedence over global settings.json for both the inherit
+	// label and the suppress-on-write check.
+	if v := os.Getenv(EnvModel); v != "" {
+		globalModel = v
+	}
+	if v := os.Getenv(EnvEffort); v != "" {
+		globalEffort = v
+	}
 	plugins, err := DiscoverPlugins(filepath.Join(configDir, "plugins", "installed_plugins.json"))
 	if err != nil {
 		return err
